@@ -1,0 +1,477 @@
+https://web.archive.org/web/20150430190500/http://www.zenjava.com/2011/12/11/javafx-and-mvp-a-smorgasbord-of-design-patterns/
+JavaFX 2.0, FXML and Spring | Zen Java
+
+* 
+
+
+* Blog 
+* JavaFX Maven Plugin 
+* About Me 
+
+JavaFX 2.0, FXML and Spring 
+
+* 
+ * Oct
+ * 23
+ * 2011
+
+* 
+* 
+
+
+JavaFX 2.0, FXML and Spring 
+
+Posted by zonski In Uncategorized 
+
+This entry is part 1 of 15 in the series Building JEE applications in JavaFX 2.0
+
+
+Building JEE applications in JavaFX 2.0
+
+
+* JavaFX 2.0, FXML and Spring
+* Better Controller Injection
+* Multiple Controllers with Shared Resources
+* Views within Views, Controllers within Controllers
+* Generic Controllers
+* Client Server with JavaFX 2 and Hessian (+Guice +FXML)
+* JFX Flow early access
+* JavaFX and MVP – a smörgåsbord of design patterns
+* JavaFX and Maven
+* Porting “First Contact” to Spring
+* Going Remote – JavaFX and Spring Remoting
+* JavaFX and persistence: adding database support
+* Search like you mean it
+* Captains Log
+* JavaFX and Spring Security
+
+Richard Bair recently posted the results of his experiments with FXML Dependency Injection using Guice. I’m a big fan of Guice but Spring is the most popular
+application development framework for enterprise Java (that’s what their website says anyway), mainly because it offers much more than just a DI framework, with
+support for databases, transactions, remoting, security and much more.
+
+As such, I’m intending for this post to be the first in a series, called Building JEE applications in JavaFX 2.0, where I’m going to explore various options for doing
+just that. This is new territory for everyone, so I welcome all feedback and comments that can help us refine the ‘best practices’ in this ares.
+
+In this first post I’m just going to do a direct port of Richard’s FXML+Guice example into Spring. A lot of people still think Spring is all about XML configuration
+files, but it has evolved a lot since those early days. I’m going to use Spring’s annotation based configuration to create a pure Java example (i.e. zero Spring XML)
+that looks almost identical to the Guice one.
+
+For those that want to skip the details and get straight to the code, you can find it here: http://code.google.com/p/jfxee/source/browse/trunk/jfxspring/
+
+Note that this is a Maven project – I’m not going to go into detail on this in this post (I will later though), but it is a very simple project structure. If you’ve not used
+Maven before you can add your own ant scripts to the project or work out how to use Maven (both Eclipse and IntelliJ can open the pom.xml for you and just
+work). 
+
+Step 1: create a Person bean:
+
+This is pretty much the same as Richard’s
+
+
+
+public class Person
+{
+    private String firstName;
+
+    public Person(String firstName)
+    {
+        this.firstName = firstName;
+    }
+
+    public String getFirstName()
+    {
+        return firstName;
+    }
+}
+
+
+Step 2: create a SampleController
+
+This is similar to Richard’s however instead of using Guice’s @Inject annotation, we use Spring’s @Autowire one (I’ve annotated the parameter but you could use
+constructor injection if you want):
+
+
+import org.springframework.beans.factory.annotation.Autowired;
+
+public class SampleController
+{
+    @Autowired
+    private Person person;
+
+    public Person getPerson()
+    {
+        return person;
+    }
+
+    public void print()
+    {
+        System.out.println("Well done, " + person.getFirstName() + "!");
+    }
+}
+
+
+Step 3: create the FXML file
+
+This is identical to Richard’s, except I used the getPerson().getFirstName() instead of a getPersonName() – Richard could have done the same, no real difference
+on this.
+
+
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?language javascript?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+
+<StackPane fx:id="root" xmlns:fx="http://javafx.com/fxml">
+    <children>
+        <Button fx:id="printBtn" onAction="controller.print()" />
+        <fx:script>printBtn.text = 'Click Me ' + controller.getPerson().getFirstName() + '!';</fx:script>
+    </children>
+</StackPane>
+
+
+Step 4: Create a Spring Application Context
+
+Here’s where things start to get interesting. Instead of the Guice ‘Module’ we need to define a Spring equivalent. In this case I have defined a class called
+SampleAppFactory (but you can call it anything) – the important bit is that it is annotated with Spring’s @Configuration. Each of the methods that are then
+annotated with @Bean belong to the context and Spring can do magic wiring for us. In our case the SampleController will get wired up with the Person because
+of the @Autowired annotation on it.
+
+For anyone used to Spring XML, this class is pretty much a direct replacement of the XML configuration file:
+
+
+import org.springframework.context.annotation.Configuration;
+
+@Configuration
+public class SampleAppFactory
+{
+    @Bean
+    public Person person()
+    {
+        return new Person("Richard");
+    }
+
+    @Bean
+    public SampleController sampleController()
+    {
+        return new SampleController();
+    }
+}
+
+
+Step 5: Build a custom FXML loader
+
+We can easily build the Spring equivalent of Richard’s GuiceFXMLLoader. It just needs to load the controller from the application context instead of the Guice
+Injector. In my next post I’m going to look at how we can simplify this and clean things up a little.
+
+
+import javafx.fxml.FXMLLoader;
+import org.springframework.context.ApplicationContext;
+
+import java.io.IOException;
+import java.io.InputStream;
+
+public class SpringFxmlLoader
+{
+    private ApplicationContext context;
+
+    public SpringFxmlLoader(ApplicationContext context)
+    {
+        this.context = context;
+    }
+
+    public Object load(String url, Class<?> controllerClass) throws IOException
+    {
+        InputStream fxmlStream = null;
+        try
+        {
+            fxmlStream = controllerClass.getResourceAsStream(url);
+            Object instance = context.getBean(controllerClass);
+            FXMLLoader loader = new FXMLLoader();
+            loader.getNamespace().put("controller", instance);
+            return loader.load(fxmlStream);
+        }
+        finally
+        {
+            if (fxmlStream != null)
+            {
+                fxmlStream.close();
+            }
+        }
+    }
+}
+
+
+Step 6: Create an ‘Application’ to launch it all
+
+This is quite similar to the Guice approach, except we load our application context instead of the Guice injector:
+
+
+import javafx.application.Application;
+import javafx.scene.Parent;
+import javafx.scene.Scene;
+import javafx.stage.Stage;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
+
+public class SampleApp extends Application
+{
+    public static void main(String[] args)
+    {
+        launch(args);
+    }
+
+    public void start(Stage stage) throws Exception
+    {
+        AnnotationConfigApplicationContext context
+                = new AnnotationConfigApplicationContext(SampleAppFactory.class);
+        SpringFxmlLoader loader = new SpringFxmlLoader(context);
+
+        Parent root = (Parent) loader.load("/sample.fxml", SampleController.class);
+        Scene scene = new Scene(root, 320, 240);
+        scene.getStylesheets().add("/fxmlapp.css");
+        stage.setScene(scene);
+        stage.setTitle("JFX2.0 Sprung");
+        stage.show();
+    }
+}
+
+
+That’s it! As you can see the code is extremely similar to Guice so the choice between Guice and Spring should depend on the other features offered by each and
+how these may benefit you. I’m going to stick with Spring for this series, but a lot of what I go through could easily be adapted back to Guice.
+
+Series NavigationBetter Controller Injection >>
+
+
+* Better Controller Injection 
+* 15 Comments 
+
+* 
+* 
+
+ Richard Bair 
+
+
+ October 23, 2011 
+
+
+ Very cool. One thing though, in the SpringFxmlLoader you need to explicitly close the input stream. It is a royal pain in the neck, but there you have it 
+:-) 
+
+* 
+* 
+
+ zonski Author 
+
+
+ October 23, 2011 
+
+
+ Thanks Richard, I’ve updated the code to do this.
+
+* 
+* 
+
+ macalase 
+
+
+ November 9, 2011 
+
+
+ I have been trying to get you projects going using Maven, but having no luck. Updated pom.xml, to point javafx to the program files/oracle …..
+
+ I have all of the projects at http://code.google.com/p/jfxee/source/browse/trunk/ building correctly with no errors.
+
+ But as soon as I go to run the application in any project, I always get the following
+ Executing command line: “C:\Program Files (x86)\Java\jdk1.6.0_26\bin\java.exe” -classpath
+ C:\Users\Mac\Documents\NetBeansProjects\trunk\jfxee5\target\classes;C:\Users\Mac\.m2\repository\org\springframework\spring-context\3.0.6.RELEASE\spring-context-3.0.6.RELEASE.jar;C:\Users\Mac\.m2\repository\org\springframework\spring-aop\3.0.6.RELEASE\spring-aop-3.0.6.RELEASE.jar;C:\Users\Mac\.m2\repository\org\springframework\spring-beans\3.0.6.RELEASE\spring-beans-3.0.6.RELEASE.jar;C:\Users\Mac\.m2\repository\org\springframework\spring-core\3.0.6.RELEASE\spring-core-3.0.6.RELEASE.jar;C:\Users\Mac\.m2\repository\commons-logging\commons-logging\1.1.1\commons-logging-1.1.1.jar;C:\Users\Mac\.m2\repository\org\springframework\spring-expression\3.0.6.RELEASE\spring-expression-3.0.6.RELEASE.jar;C:\Users\Mac\.m2\repository\org\springframework\spring-asm\3.0.6.RELEASE\spring-asm-3.0.6.RELEASE.jar;C:\Users\Mac\.m2\repository\cglib\cglib\2.2\cglib-2.2.jar;C:\Users\Mac\.m2\repository\asm\asm\3.1\asm-3.1.jar
+ com.zenjava.jfxspring.SampleApp
+ java.lang.NoClassDefFoundError: javafx/application/Application
+
+ Any ideas why Maven is not finding the jfxruntime when trying to run??
+
+* 
+* 
+
+ zonski Author 
+
+
+ November 9, 2011 
+
+
+ It looks like the jfxrt.jar is not being added to your runtime classpath. If you are compiling correctly then it must be adding it to the compile classpath so this is
+ a little strange.
+
+ Due to complexities with Maven and native files we currently have to use the system (I’m trying to find ways around this). My guess is that NetBeans isn’t
+ handling this system scope properly and is leaving out the JFX runtime jar (system scope is not used often so it’s possible NetBeans doesn’t support it that
+ well). I don’t use NetBeans myself but IntelliJ definitely works with this setup. I do have a copy of NetBeans on my work computer so I will give it a whirl
+ tomorrow and get back to you.
+
+ Short term fix would be to manually add the jfxrt.jar (found in your-jfx-home/rt/lib) to your classpath using NetBeans’ standard classpath system. Make sure
+ you leave the jar in the place where it was installed and just reference it there, don’t move it or the dll’s won’t load.
+
+* 
+* 
+
+ Jesús Flores 
+
+
+ February 7, 2012 
+
+
+ I have used NetBeans 7.1 to open the project with maven.
+ I have just edited the pom.xml to look for a jfxrt.jar that I had previously installed in my local repository with the next command:
+
+ mvn install:install-file -Dfile=”C:\Program Files\Oracle\JavaFX 2.0 SDK\rt\lib\jfxrt.jar” -DgroupId=com.oracle.javafx -DartifactId=javafx -Dversion=2.0.2
+ -Dpackaging=jar
+
+ The project doesn’t show errors or warnings and was built succesfully… But NetBeans has created the project with just the three dependencies described in
+ the pom.xml and a “project files” folder with the pom.xml inside. ¿ Isn’t maven supposed to create a java app. architecture ? I mean the folder structure like
+ src/main/java and src/main/test ¿ Or I should create that things ?
+
+ Thank you !!
+
+* 
+* 
+
+ zonski Author 
+
+
+ February 8, 2012 
+
+
+ Maven can create those directories for you (or Netbeans probably will to, but I don’t use it so can’t say for sure). You have to use one of the templates for this
+ though. Maven calls these archetypes: http://maven.apache.org/guides/introduction/introduction-to-archetypes.html
+
+ I usually don’t bother however and I just add the src/main/java directory and the like manually. In IntelliJ (and I’m pretty sure Eclipse) it will automatically pick
+ up these directories once they have been created manually and you can start using them.
+
+ Just a word of caution, by installing the jar file in the repo, your code will compile (since the jar is available) but JFX won’t be able to find the dll’s when it is run
+ (these are kept outside of the jar). I’m planning to do a post on this shortly.
+
+ * 
+* 
+
+ Jesús Flores 
+
+
+ February 9, 2012 
+
+
+ Woh, that went faster than expected… Your reply helped me very much to understand some things… gave me some clues. I’ve been reading that theres a
+ plugin for eclipse called m2eclipse that lets you do something like that “mvn eclipse:eclipse” in order to import the project to the IDE with a given pom.xml
+ maybe this feature is there also for NetBeans. If not i suppose I should first create a project (an artifact) with the groupId=com.zenjava, package=jfxspring
+ and an archetype i.e. maven-archetype-quickstart in order to match the same folder structure in the project of your google prj. repository
+ src/main/java/com/zenjava/jfxspring and then edit the pom.xml dependencies manually…
+
+ Ahm, nice advice about the jfxrt.jar, i’ll return then to the system scope… And I’ll be impatient for your next post 
+;-) 
+
+ Thank you very much !
+
+* 
+* 
+
+ Alan 
+
+
+ March 25, 2012 
+
+
+ In step 5:
+ “We can easily build the Swing equivalent of Richard’s GuiceFXMLLoader. ”
+
+ I think it’s supposed to be Spring instead of Swing.
+ Am i right?
+
+* 
+* 
+
+ zonski Author 
+
+
+ March 25, 2012 
+
+
+ Yes, ‘Spring’ not ‘Swing’ – good catch. I’ve fixed the post. Thanks!
+
+* 
+* 
+
+ Prashanth Kumar 
+
+
+ June 16, 2012 
+
+
+ I think
+
+ scene.getStylesheets().add(“/fxmlapp.css”);
+
+ should be
+ scene.getStylesheets().add(“fxmlapp.css”);
+
+ fxmlapp.css with out the “/” . Had to make this to get it to work.
+
+* 
+* 
+
+ Diego 
+
+
+ January 9, 2013 
+
+
+ You could improve your way to load the fxml using: FXMLLoader.load(getClass().getResource(s)); instead get it as stream. Or is it a bad practice?
+
+* 
+* 
+
+ Wouter 
+
+
+ February 5, 2013 
+
+
+ nice way to inject your controller in SprinFxmlLoader but it doesn’t seem to work for me:
+ I get following error:
+ javafx.fxml.LoadException: No controller specified.
+
+ anyone got a suggestion?
+
+Leave a Comment 
+
+First Name 
+
+Last Name 
+
+Email 
+
+Website
+
+Your message 
+
+Submit Comment 
+
+
+Archives
+
+* August 2013 
+* July 2013 
+* June 2013 
+* May 2013 
+* February 2013 
+* December 2012 
+* November 2012 
+* March 2012 
+* February 2012 
+* December 2011 
+* November 2011 
+* October 2011 
+
+Categories
+
+* Enterprise 
+* JavaFX 
+* RoboVM 
+* Uncategorized 
+
+© 2012 Daniel Zwolenski. All Rights Reserved.
